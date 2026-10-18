@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="description" content="Turbo Sprint este un joc gratuit de curse auto în browser. Evită traficul, adună puncte și bate-ți recordul!">
+<meta name="theme-color" content="#101827">
+<title>Turbo Sprint — Joc de curse auto gratuit</title>
+<style>
+:root{color-scheme:dark;--bg:#101827;--panel:#1d293b;--accent:#ffd43b;--cyan:#55e6ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#243b55,#101827 60%);font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#f5f7fb;min-height:100vh;display:flex;justify-content:center;padding:16px}
+main{width:min(100%,520px)}header{text-align:center;margin:5px 0 12px}h1{margin:0;font-size:clamp(28px,7vw,42px);letter-spacing:1px}h1 span{color:var(--accent)}.sub{color:#bac7d9;margin:4px 0 12px;font-size:14px}
+.hud{display:flex;gap:8px;margin-bottom:10px}.stat{background:var(--panel);border:1px solid #35445a;border-radius:12px;padding:9px 12px;flex:1;text-align:center}.stat small{display:block;color:#aebbd0;font-size:11px;text-transform:uppercase;letter-spacing:.7px}.stat b{font-size:20px}
+.gamebox{position:relative;border:2px solid #42536c;border-radius:18px;overflow:hidden;box-shadow:0 18px 50px #0007;background:#17251f}canvas{display:block;width:100%;height:auto;touch-action:none}
+.overlay{position:absolute;inset:0;background:#08111dcc;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px}.overlay.hidden{display:none}.dialog{max-width:310px}.dialog h2{font-size:29px;margin:0 0 8px}.dialog p{color:#d4deec;line-height:1.45;margin:0 0 18px}
+button{border:0;border-radius:12px;font:700 16px system-ui;cursor:pointer;touch-action:manipulation}.primary{background:var(--accent);color:#202331;padding:13px 22px;box-shadow:0 4px 0 #b98d00}.primary:active{transform:translateY(2px);box-shadow:0 2px 0 #b98d00}
+.controls{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px;margin:12px 0}.control{background:#26364c;color:white;padding:15px 10px;border:1px solid #455a75;box-shadow:inset 0 -3px #172233;font-size:21px}.control span{display:block;font-size:11px;color:#c3d0e2}.control:active,.control.active{background:#385576}
+.help{font-size:12px;color:#aebbd0;text-align:center;margin:8px 0 0}.footer{font-size:12px;color:#91a0b7;text-align:center;margin:14px 0}
+@media(min-width:500px){body{padding-top:20px}.controls{gap:14px}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>🏁 TURBO <span>SPRINT</span></h1><p class="sub">Evită traficul. Prinde viteza. Bate recordul!</p></header>
+<div class="hud">
+ <div class="stat"><small>Scor</small><b id="score">0</b></div>
+ <div class="stat"><small>Viteză</small><b><span id="speed">0</span> km/h</b></div>
+ <div class="stat"><small>Record</small><b id="best">0</b></div>
+</div>
+<div class="gamebox">
+<canvas id="game" width="420" height="620" aria-label="Joc de curse auto"></canvas>
+<div class="overlay" id="overlay"><div class="dialog"><h2 id="headline">Gata de cursă?</h2><p id="message">Condu printre mașini, evită accidentele și încearcă să obții cel mai mare scor.</p><button class="primary" id="start">PORNEȘTE CURSA ▶</button></div></div>
+</div>
+<div class="controls">
+ <button class="control" id="left" aria-label="Stânga">◀<span>STÂNGA</span></button>
+ <button class="control" id="right" aria-label="Dreapta">▶<span>DREAPTA</span></button>
+ <button class="control" id="boost" aria-label="Turbo">⚡<span>TURBO</span></button>
+</div>
+<p class="help">Pe telefon: ține apăsat pe butoane. Pe computer: ← → sau A/D; ține apăsat SPACE pentru turbo.</p>
+<p class="footer">Turbo Sprint • Joc gratuit pentru browser • Creat pentru distracție</p>
+</main>
+<script>
+(() => {
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),speedEl=document.getElementById('speed'),bestEl=document.getElementById('best');
+const overlay=document.getElementById('overlay'),headline=document.getElementById('headline'),message=document.getElementById('message'),startBtn=document.getElementById('start');
+const W=canvas.width,H=canvas.height;
+let running=false,score=0,speed=0,best=0,playerX=W/2,roadOffset=0,spawn=0,last=0,traffic=[],particles=[],left=false,right=false,boost=false,crashed=false;
+try{best=Number(localStorage.getItem('turboSprintBest')||0)}catch(e){}bestEl.textContent=best;
+const road={left:58,right:362};
+function roundedRect(x,y,w,h,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
+function drawCar(x,y,color,player=false){
+ ctx.save();ctx.translate(x,y);
+ // shadow and wheels
+ roundedRect(-19,9,38,62,9,'#0005');
+ roundedRect(-22,-25,9,22,'#10151c');roundedRect(13,-25,9,22,'#10151c');
+ roundedRect(-22,18,9,22,'#10151c');roundedRect(13,18,9,22,'#10151c');
+ roundedRect(-17,-31,34,65,9,color);
+ roundedRect(-12,-19,24,21,5,player?'#b9f4ff':'#d8e7f5');
+ roundedRect(-12,8,24,14,4,player?'#1d6b83':'#333e4b');
+ ctx.fillStyle=player?'#fff5ac':'#ffdfad';ctx.fillRect(-13,-29,7,4);ctx.fillRect(6,-29,7,4);
+ ctx.fillStyle='#ff4747';ctx.fillRect(-13,27,7,4);ctx.fillRect(6,27,7,4);
+ if(player){ctx.fillStyle='#fff';ctx.fillRect(-2,-26,4,57)}
+ ctx.restore();
+}
+function drawRoad(dt){
+ ctx.fillStyle='#277547';ctx.fillRect(0,0,W,H);
+ // roadside texture
+ for(let i=0;i<18;i++){let y=((i*47+roadOffset*.7)%H);ctx.fillStyle=i%2?'#348a51':'#22673f';ctx.fillRect(0,y,48,14);ctx.fillRect(W-48,y,48,14)}
+ ctx.fillStyle='#363d48';ctx.fillRect(road.left,0,road.right-road.left,H);
+ ctx.fillStyle='#e8e8d8';ctx.fillRect(road.left,0,5,H);ctx.fillRect(road.right-5,0,5,H);
+ ctx.fillStyle='#f7f3d7';
+ for(let y=-45+roadOffset%90;y<H;y+=90){ctx.fillRect(157,y,6,48);ctx.fillRect(257,y,6,48)}
+ roadOffset+=dt*(running?(boost?430:260+speed):50);
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);drawRoad(16);
+ traffic.forEach(c=>drawCar(c.x,c.y,c.color));
+ drawCar(playerX,H-110,'#24c9e8',true);
+ particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/25);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1});
+ if(boost&&running){ctx.fillStyle='#72edff';ctx.globalAlpha=.45;ctx.fillRect(playerX-10,H-35,5,25+Math.random()*25);ctx.fillRect(playerX+5,H-35,5,25+Math.random()*25);ctx.globalAlpha=1}
+}
+function spawnCar(){const lanes=[110,210,310],x=lanes[Math.floor(Math.random()*lanes.length)];traffic.push({x,y:-65,color:['#f05b55','#f5b942','#ad87ff','#f4f5f7'][Math.floor(Math.random()*4)],speed:170+Math.random()*90})}
+function reset(){score=0;speed=0;playerX=210;roadOffset=0;spawn=0;traffic=[];particles=[];crashed=false;scoreEl.textContent='0';speedEl.textContent='0'}
+function endGame(){running=false;crashed=true;headline.textContent='💥 Cursa s-a terminat!';message.textContent=`Ai obținut ${Math.floor(score)} puncte. ${score>best?'Record nou!':'Mai încearcă o dată și depășește-ți recordul!'}`;startBtn.textContent='REÎNCEARCĂ ↻';overlay.classList.remove('hidden');if(score>best){best=Math.floor(score);bestEl.textContent=best;try{localStorage.setItem('turboSprintBest',best)}catch(e){}}}
+function loop(t){const dt=Math.min((t-last)/1000||0,.035);last=t;
+ if(running){
+  const actual=boost?500:290+Math.min(score*.12,210);speed=Math.floor(actual/3.6);
+  if(left)playerX-=260*dt;if(right)playerX+=260*dt;playerX=Math.max(road.left+28,Math.min(road.right-28,playerX));
+  spawn+=dt;if(spawn>(boost?.62:.9)-Math.min(score/5000,.25)){spawn=0;spawnCar()}
+  traffic.forEach(c=>c.y+=(c.speed+actual*.36)*dt);traffic=traffic.filter(c=>c.y<H+80);
+  score+=dt*(boost?19:10);scoreEl.textContent=Math.floor(score);speedEl.textContent=speed;
+  for(const c of traffic){if(Math.abs(c.x-playerX)<34&&Math.abs(c.y-(H-110))<48){endGame();break}}
+  if(Math.random()<.22){particles.push({x:playerX+(Math.random()-.5)*30,y:H-70,r:2+Math.random()*3,life:25,color:boost?'#77eaff':'#d4d9df'})}
+  particles.forEach(p=>{p.y+=3;p.life--});particles=particles.filter(p=>p.life>0);
+ }
+ draw();requestAnimationFrame(loop)}
+startBtn.addEventListener('click',()=>{reset();running=true;overlay.classList.add('hidden')});
+function bind(id,down,up){const el=document.getElementById(id);el.addEventListener('pointerdown',e=>{e.preventDefault();down();el.classList.add('active')});['pointerup','pointercancel','pointerleave'].forEach(ev=>el.addEventListener(ev,()=>{up();el.classList.remove('active')}))}
+bind('left',()=>left=true,()=>left=false);bind('right',()=>right=true,()=>right=false);bind('boost',()=>boost=true,()=>boost=false);
+window.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight',' ','a','d','A','D'].includes(e.key))e.preventDefault();if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')left=true;if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')right=true;if(e.key===' ')boost=true;if(!running&&(e.key==='Enter'))startBtn.click()});
+window.addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')left=false;if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')right=false;if(e.key===' ')boost=false});
+canvas.addEventListener('pointerdown',e=>{if(!running)return;const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W;if(x<W/2){left=true;right=false}else{right=true;left=false}});
+canvas.addEventListener('pointerup',()=>{left=false;right=false});canvas.addEventListener('pointercancel',()=>{left=false;right=false});
+draw();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
